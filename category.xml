@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<site>
+   <feature id="com.avlbel.edt.applyindicator.feature" version="0.0.0">
+      <category name="edt.applyindicator"/>
+   </feature>
+   <category-def name="edt.applyindicator" label="EDT Apply Indicator">
+      <description>
+         Индикатор применения конфигурации к базам приложений в статусной строке EDT.
+      </description>
+   </category-def>
+</site>
