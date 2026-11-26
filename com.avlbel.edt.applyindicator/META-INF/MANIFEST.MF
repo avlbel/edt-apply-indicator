@@ -6,7 +6,7 @@ Bundle-SymbolicName: com.avlbel.edt.applyindicator;singleton:=true
 Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: com.avlbel.edt.applyindicator.Activator
 Bundle-ActivationPolicy: lazy
-Bundle-RequiredExecutionEnvironment: JavaSE-17
+Bundle-RequiredExecutionEnvironment: JavaSE-25
 Bundle-Localization: plugin
 Require-Bundle: org.eclipse.ui,
  org.eclipse.core.runtime,
@@ -14,8 +14,9 @@ Require-Bundle: org.eclipse.ui,
  org.eclipse.core.jobs,
  org.eclipse.jface,
  org.eclipse.swt
-Import-Package: com._1c.g5.v8.dt.platform.services.ui,
- com._1c.g5.wiring,
- com.e1c.g5.dt.applications,
- com.e1c.g5.dt.applications.ui.view
+Import-Package: com._1c.g5.v8.dt.platform.services.ui;
+ version="[8.2.0,9.0.0)",
+ com._1c.g5.wiring;version="[2.4.0,3.0.0)",
+ com.e1c.g5.dt.applications;version="[7.0.0,8.0.0)",
+ com.e1c.g5.dt.applications.ui.view;version="[1.2.0,2.0.0)"
 Automatic-Module-Name: com.avlbel.edt.applyindicator

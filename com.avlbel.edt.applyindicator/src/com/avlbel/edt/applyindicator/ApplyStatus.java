@@ -7,8 +7,9 @@ import com.e1c.g5.dt.applications.ApplicationUpdateState;
 /**
  * Сводка состояний применения по приложениям текущего проекта.
  * <p>
- * Источник каждого значения — {@link ApplicationUpdateState}, его же читает
- * декоратор представления «Приложения» ({@code ApplicationsDecorator}):
+ * Источник каждого значения — {@link ApplicationUpdateState} из EDT 2026.2
+ * (бандл {@code com.e1c.g5.dt.applications} 7.0.1). Набор констант тот же,
+ * что читает декоратор представления «Приложения» ({@code ApplicationsDecorator}):
  * зелёная галочка для {@code UPDATED}, жёлтая звёздочка для неприменённой базы.
  * {@code UNKNOWN} галочку и звёздочку не рисует, поэтому в сводке он не
  * считается ни применённым, ни неприменённым.
