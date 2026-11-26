@@ -6,9 +6,11 @@
 
 Идентификатор бандла: `com.avlbel.edt.applyindicator`.
 
-Нужен **EDT 2025.2 или новее**. В 2025.1 и 2024.x тот же смысл был у `PublishState` / `getPublishState`; с 2025.2 тип называется `ApplicationUpdateState`, метод — `getUpdateState`. Плагин написан на API 2025.2.
+Таргет — **EDT 2026.2** (репозиторий `https://edt.1c.ru/downloads/releases/ruby/2026.2/`, поставка 2026.2.3, Eclipse 2025-12, Java 25). Плагин компилируется как Java 25.
 
-В этом репозитории плагин **не собран**: платформы EDT здесь нет, это проприетарный target. Проект импортируется в Eclipse PDE и компилируется после подключения локальной установки EDT.
+Состояние приложений в 2026.2 не переименовано: это по-прежнему `IApplicationManager.getUpdateState` и `ApplicationUpdateState` (`UPDATED`, `INCREMENTAL_UPDATE_REQUIRED`, `FULL_UPDATE_REQUIRED`, `BEING_UPDATED`, `UNKNOWN`). Слушатель — `addAppllicationListener`, события `UPDATE_STATE_CHANGED` и `LIFECYCLE_STATE_CHANGED`. Значки меню — `ApplicationLabelProvider`. В этой поставке `ApplicationException` стал непроверяемым исключением; индикатор по-прежнему его перехватывает. Новый метод менеджера `suggestNewApplicationName` индикатору не нужен.
+
+Проверено по бандлам p2: `com.e1c.g5.dt.applications` 7.0.1.v202610261959, `com.e1c.g5.dt.applications.ui` 6.1.0.v202610261959. Отдельной javadoc-страницы 2026.2 на edt.1c.ru нет. Исходники собраны JDK 25 против этих бандлов (`javac --release 25`).
 
 ## Что показывает индикатор
 
@@ -31,22 +33,21 @@
 - факт применения — `getUpdateState(IApplication)`;
 - подписка — `addAppllicationListener` (в API три буквы `l`). Слушаются `UPDATE_STATE_CHANGED` и `LIFECYCLE_STATE_CHANGED` (создание, удаление, смена жизненного цикла). Отдельного опроса файлов нет.
 
-Описание типа: [ApplicationUpdateState](https://edt.1c.ru/dev/edt/2025.2/apidocs/com/e1c/g5/dt/applications/ApplicationUpdateState.html), менеджер: [IApplicationManager](https://edt.1c.ru/dev/edt/2025.2/apidocs/com/e1c/g5/dt/applications/IApplicationManager.html). `getUpdateState` смотрит кэш EDT и не сравнивает базу с конфигуратором. Так же ведёт себя представление «Приложения».
+`getUpdateState` смотрит кэш EDT и не сравнивает базу с конфигуратором. Так же ведёт себя представление «Приложения». Имена типов сверены с class-файлами EDT 2026.2.
 
 ## Как подключить target
 
-1. Поставьте [Eclipse IDE for RCP and RAP Developers](https://www.eclipse.org/downloads/packages/) с PDE. Достаточно Java 17: байткод плагина — 17, на JVM EDT 2025 он выполняется.
+1. Поставьте [Eclipse IDE for RCP and RAP Developers](https://www.eclipse.org/downloads/packages/) 2025-12 или новее, с PDE и JDK 25. EDT 2026.2 сам работает на Java 25; class-файлы его API имеют версию 69, JDK 17 их не читает.
 2. **File → Import → General → Existing Projects into Workspace**. Отметьте `com.avlbel.edt.applyindicator`, `com.avlbel.edt.applyindicator.feature` и `edt-apply-indicator-target`.
-3. Откройте `edt.target` в проекте `edt-apply-indicator-target` (это файл `targets/edt.target`). В редакторе target на вкладке Definition замените каталог `/path/to/edt` на корень своей установки EDT — каталог, внутри которого лежат `plugins` и `features` (не вложенный `plugins`). Либо поправьте атрибут `path` прямо в файле и обновите редактор.
-4. **Set as Active Target Platform** и дождитесь разрешения плагинов. Пока каталог не указывает на реальную установку EDT, импорты `com.e1c.g5.*` и `com._1c.g5.*` будут красными — это ожидаемо.
-5. Если PDE ругается на версию Java, оставьте compliance 17. Если EDT новее и какой-то метод переименован, сверяйтесь с javadoc этой поставки: нужен менеджер приложений и состояние обновления информационной базы.
+3. Откройте `edt.target` в проекте `edt-apply-indicator-target` (файл `targets/edt.target`). Репозиторий уже указывает на `https://edt.1c.ru/downloads/releases/ruby/2026.2/`. Нажмите **Set as Active Target Platform** и дождитесь загрузки. Если p2 недоступен, замените location на **Directory** и укажите корень локальной установки именно EDT 2026.2 — каталог, внутри которого лежат `plugins` и `features`.
+4. Compliance проекта — Java 25. Не переключайте его на 17: иначе PDE не увидит классы EDT.
 
 ## Как установить плагин в EDT
 
 1. В PDE: **File → Export → Plug-in Development → Deployable plug-ins and fragments**. Отметьте `com.avlbel.edt.applyindicator`. Каталог назначения — любой пустой.
 2. Скопируйте полученный jar в каталог `dropins` установки EDT. Если `dropins` нет — создайте его рядом с `plugins`.
 3. Запустите EDT с очисткой кэша один раз: добавьте `-clean` в `1cedt.ini` (или ярлык), откройте IDE, затем строку `-clean` уберите.
-4. Плагин виден в **Справка → О программе → Сведения об установке → Подключаемые модули**, имя **EDT Apply Indicator**. Если его нет, смотрите журнал ошибок: чаще всего не резолвится `Import-Package` (установка старше 2025.2 или target собран не из той поставки).
+4. Плагин виден в **Справка → О программе → Сведения об установке → Подключаемые модули**, имя **EDT Apply Indicator**. Ставьте его в EDT 2026.2. Если его нет в списке, смотрите журнал: `Import-Package` требует версии пакетов этой поставки (`com.e1c.g5.dt.applications` 7.x и соседние диапазоны из `MANIFEST.MF`).
 
 Рядом лежит feature `com.avlbel.edt.applyindicator.feature` — его можно экспортировать как deployable feature и положить в `dropins` целиком (`eclipse/plugins` и `eclipse/features`). Для проверки достаточно одного jar плагина.
 
