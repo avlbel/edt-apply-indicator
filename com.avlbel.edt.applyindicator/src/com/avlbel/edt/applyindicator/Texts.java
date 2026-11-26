@@ -6,7 +6,9 @@ package com.avlbel.edt.applyindicator;
  */
 final class Texts {
 
+    static final String CAPTION = "Приложения";
     static final String NO_PROJECT = "Нет текущего проекта";
+    static final String MANY_PROJECTS = "Открыто несколько проектов";
     static final String CONNECTING = "Чтение состояния применения…";
     static final String NO_SERVICE = "Сервис приложений EDT недоступен";
     static final String READ_FAILED = "Не удалось прочитать приложения проекта «%s»";

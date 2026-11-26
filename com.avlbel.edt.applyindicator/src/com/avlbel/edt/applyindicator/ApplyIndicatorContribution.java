@@ -10,15 +10,20 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IResourceChangeEvent;
 import org.eclipse.core.resources.IResourceChangeListener;
 import org.eclipse.core.resources.IResourceDelta;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.IAdaptable;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.viewers.ISelection;
+import org.eclipse.jface.viewers.ISelectionProvider;
+import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.MouseAdapter;
 import org.eclipse.swt.events.MouseEvent;
@@ -27,16 +32,21 @@ import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.Point;
+import org.eclipse.swt.graphics.Rectangle;
+import org.eclipse.swt.layout.RowData;
+import org.eclipse.swt.layout.RowLayout;
 import org.eclipse.swt.widgets.Canvas;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IPageListener;
 import org.eclipse.ui.IPartListener;
 import org.eclipse.ui.ISelectionListener;
+import org.eclipse.ui.IViewPart;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchPart;
 import org.eclipse.ui.IWorkbenchWindow;
@@ -52,13 +62,16 @@ import com.e1c.g5.dt.applications.IApplication;
 import com.e1c.g5.dt.applications.IApplicationEvent;
 import com.e1c.g5.dt.applications.IApplicationListener;
 import com.e1c.g5.dt.applications.IApplicationManager;
+import com.e1c.g5.dt.applications.ui.IApplicationsUiConstants;
 import com.e1c.g5.dt.applications.ui.view.ApplicationLabelProvider;
 
 /**
  * Квадратный индикатор в статусной строке EDT.
  * <p>
- * Текущий проект — тот же, что у представления «Приложения»:
- * {@link SelectionContextProject}. Список приложений и факт применения читаются
+ * Текущий проект берётся из активного или открытого представления «Приложения»
+ * и его выделения, затем из редактора и {@link SelectionContextProject},
+ * затем из единственного открытого проекта рабочей области. Список приложений
+ * и факт применения читаются
  * у {@link IApplicationManager} и обновляются по {@link IApplicationListener},
  * а не опросом файлов проекта. Значок пункта меню берётся из
  * {@link ApplicationLabelProvider}: это публичная обёртка над тем же
@@ -67,8 +80,6 @@ import com.e1c.g5.dt.applications.ui.view.ApplicationLabelProvider;
 public class ApplyIndicatorContribution extends WorkbenchWindowControlContribution
         implements IApplicationListener {
 
-    private static final int INDICATOR_SIZE = 22;
-    private static final int SQUARE_SIZE = 12;
     private static final Collator COLLATOR = Collator.getInstance();
 
     private final ISelectionListener selectionListener = (part, selection) -> updateContextProject();
@@ -78,7 +89,9 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
     private final AtomicBoolean supplierClosed = new AtomicBoolean();
     private final Set<String> loggedFailures = new HashSet<>();
 
+    private Composite bar;
     private Canvas canvas;
+    private Label caption;
     private Menu menu;
     private IWorkbenchWindow window;
     private Job connectJob;
@@ -104,24 +117,40 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
 
     @Override
     protected Control createControl(Composite parent) {
-        canvas = new Canvas(parent, SWT.DOUBLE_BUFFERED) {
+        bar = new Composite(parent, SWT.NONE) {
             @Override
             public Point computeSize(int wHint, int hHint, boolean changed) {
-                return new Point(INDICATOR_SIZE, INDICATOR_SIZE);
+                return preferredSize();
             }
         };
-        canvas.setSize(INDICATOR_SIZE, INDICATOR_SIZE);
-        canvas.setToolTipText(tooltip);
-        canvas.setCursor(parent.getDisplay().getSystemCursor(SWT.CURSOR_HAND));
+        RowLayout layout = new RowLayout(SWT.HORIZONTAL);
+        layout.wrap = false;
+        layout.pack = true;
+        layout.center = true;
+        layout.marginTop = 0;
+        layout.marginBottom = 0;
+        layout.marginLeft = 3;
+        layout.marginRight = 4;
+        layout.spacing = 4;
+        bar.setLayout(layout);
+        bar.setBackgroundMode(SWT.INHERIT_FORCE);
+        bar.setBackground(parent.getBackground());
+        bar.setForeground(parent.getForeground());
+        bar.setFont(parent.getFont());
+
+        canvas = new Canvas(bar, SWT.DOUBLE_BUFFERED);
         canvas.addPaintListener(this::paintIndicator);
-        canvas.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseUp(MouseEvent event) {
-                if (event.button == 1) {
-                    showMenu();
-                }
-            }
-        });
+        caption = new Label(bar, SWT.NONE);
+        caption.setText(Texts.CAPTION);
+        caption.setFont(parent.getFont());
+        caption.setForeground(parent.getForeground());
+        applyTooltip(tooltip);
+        bindClick(bar);
+        bindClick(canvas);
+        bindClick(caption);
+        fitSquare();
+        bar.addListener(SWT.Resize, event -> fitSquare());
+
         createColors(parent.getDisplay());
         if (!hooksInstalled) {
             hooksInstalled = true;
@@ -130,7 +159,65 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
             scheduleConnect();
             updateContextProject();
         }
-        return canvas;
+        Point size = preferredSize();
+        bar.setSize(size);
+        return bar;
+    }
+
+    private Point preferredSize() {
+        Point text = caption == null || caption.isDisposed()
+                ? new Point(70, 14)
+                : caption.computeSize(SWT.DEFAULT, SWT.DEFAULT, true);
+        int square = squareSide(text.y);
+        return new Point(3 + square + 4 + text.x + 4, text.y);
+    }
+
+    private static int squareSide(int textHeight) {
+        return Math.max(8, textHeight - 2);
+    }
+
+    private void fitSquare() {
+        if (bar == null || bar.isDisposed() || canvas == null || canvas.isDisposed() || caption == null
+                || caption.isDisposed()) {
+            return;
+        }
+        Point text = caption.computeSize(SWT.DEFAULT, SWT.DEFAULT, true);
+        int available = bar.getClientArea().height;
+        int side = squareSide(text.y);
+        if (available > 2) {
+            side = Math.min(side, available - 2);
+        }
+        side = Math.max(6, side);
+        RowData data = canvas.getLayoutData() instanceof RowData row ? row : null;
+        if (data != null && data.width == side && data.height == side) {
+            return;
+        }
+        canvas.setLayoutData(new RowData(side, side));
+        bar.layout(true, true);
+    }
+
+    private void bindClick(Control control) {
+        control.setCursor(control.getDisplay().getSystemCursor(SWT.CURSOR_HAND));
+        control.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseUp(MouseEvent event) {
+                if (event.button == 1) {
+                    showMenu();
+                }
+            }
+        });
+    }
+
+    private void applyTooltip(String text) {
+        if (bar != null && !bar.isDisposed()) {
+            bar.setToolTipText(text);
+        }
+        if (canvas != null && !canvas.isDisposed()) {
+            canvas.setToolTipText(text);
+        }
+        if (caption != null && !caption.isDisposed()) {
+            caption.setToolTipText(text);
+        }
     }
 
     @Override
@@ -174,7 +261,8 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
         asyncUi(() -> {
             IProject project = currentProject;
             if (project == null || eventProject == null || project.equals(eventProject)) {
-                reload();
+                projectKnown = false;
+                updateContextProject();
             }
         });
     }
@@ -245,7 +333,8 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
         }
         manager = resolved;
         manager.addAppllicationListener(this);
-        reload();
+        projectKnown = false;
+        updateContextProject();
     }
 
     private void hookWorkbench() {
@@ -286,19 +375,29 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
     }
 
     private void resourceChanged(IResourceChangeEvent event) {
-        IProject project = currentProject;
-        if (project == null || event.getDelta() == null) {
+        if (!projectStructureChanged(event.getDelta())) {
             return;
         }
-        IResourceDelta projectDelta = event.getDelta().findMember(project.getFullPath());
-        if (projectDelta == null) {
-            return;
+        asyncUi(() -> {
+            projectKnown = false;
+            updateContextProject();
+        });
+    }
+
+    private static boolean projectStructureChanged(IResourceDelta delta) {
+        if (delta == null) {
+            return false;
         }
-        boolean removed = projectDelta.getKind() == IResourceDelta.REMOVED;
-        boolean opennessChanged = (projectDelta.getFlags() & IResourceDelta.OPEN) != 0;
-        if (removed || opennessChanged) {
-            asyncUi(this::updateContextProject);
+        for (IResourceDelta child : delta.getAffectedChildren()) {
+            if (!(child.getResource() instanceof IProject)) {
+                continue;
+            }
+            if (child.getKind() == IResourceDelta.ADDED || child.getKind() == IResourceDelta.REMOVED
+                    || (child.getFlags() & IResourceDelta.OPEN) != 0) {
+                return true;
+            }
         }
+        return false;
     }
 
     private void updateContextProject() {
@@ -316,34 +415,177 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
 
     private IProject resolveProject() {
         IWorkbenchWindow current = window != null ? window : getWorkbenchWindow();
-        if (current == null) {
-            return null;
-        }
-        IWorkbenchPage page = current.getActivePage();
-        if (page == null) {
-            return null;
-        }
+        IWorkbenchPage page = current == null ? null : current.getActivePage();
         try {
-            IProject project = null;
-            ISelection selection = page.getSelection();
-            if (selection != null) {
-                project = SelectionContextProject.getContextProject(selection);
+            if (page != null) {
+                IProject fromActiveView = projectFromApplicationsView(page, true);
+                if (fromActiveView != null) {
+                    return fromActiveView;
+                }
+                IProject fromSelection = projectFromSelection(page.getSelection());
+                if (fromSelection != null) {
+                    return fromSelection;
+                }
+                IEditorPart editor = page.getActiveEditor();
+                if (editor != null) {
+                    IProject fromEditor = contextProject(editor);
+                    if (fromEditor != null) {
+                        return fromEditor;
+                    }
+                }
+                IProject fromPage = contextProject(page);
+                if (fromPage != null) {
+                    return fromPage;
+                }
+                IProject fromOpenView = projectFromApplicationsView(page, false);
+                if (fromOpenView != null) {
+                    return fromOpenView;
+                }
             }
-            IEditorPart editor = page.getActiveEditor();
-            if (project == null && editor != null) {
-                project = SelectionContextProject.getContextProject(editor);
-            }
-            if (project == null) {
-                project = SelectionContextProject.getContextProject(page);
-            }
-            if (project != null && !project.isAccessible()) {
-                return null;
-            }
-            return project;
+            return soleWorkspaceProject();
         } catch (RuntimeException ex) {
             Activator.log(IStatus.WARNING, "Не удалось определить текущий проект", ex);
+            return soleWorkspaceProject();
+        }
+    }
+
+    private IProject projectFromApplicationsView(IWorkbenchPage page, boolean activeOnly) {
+        if (activeOnly) {
+            IWorkbenchPart active = page.getActivePart();
+            if (active == null || !IApplicationsUiConstants.VIEW_ID.equals(active.getSite().getId())) {
+                return null;
+            }
+            return projectFromPart(active);
+        }
+        IViewPart view = page.findView(IApplicationsUiConstants.VIEW_ID);
+        return view == null ? null : projectFromPart(view);
+    }
+
+    private IProject projectFromPart(IWorkbenchPart part) {
+        ISelectionProvider provider = part.getSite().getSelectionProvider();
+        return provider == null ? null : projectFromSelection(provider.getSelection());
+    }
+
+    private IProject projectFromSelection(ISelection selection) {
+        if (selection == null || selection.isEmpty()) {
             return null;
         }
+        IProject fromContext = contextProject(selection);
+        if (fromContext != null) {
+            return fromContext;
+        }
+        if (!(selection instanceof IStructuredSelection structured)) {
+            return null;
+        }
+        for (Object element : structured.toList()) {
+            IProject project = adaptProject(element);
+            if (project != null) {
+                return project;
+            }
+        }
+        return null;
+    }
+
+    private IProject adaptProject(Object element) {
+        if (element instanceof IApplication application) {
+            return accessible(application.getProject());
+        }
+        if (element instanceof IProject project) {
+            return accessible(project);
+        }
+        if (element instanceof IResource resource) {
+            return accessible(resource.getProject());
+        }
+        if (element instanceof IAdaptable adaptable) {
+            IApplication application = adaptable.getAdapter(IApplication.class);
+            if (application != null) {
+                return accessible(application.getProject());
+            }
+            IProject project = adaptable.getAdapter(IProject.class);
+            if (project != null) {
+                return accessible(project);
+            }
+            IResource resource = adaptable.getAdapter(IResource.class);
+            if (resource != null) {
+                return accessible(resource.getProject());
+            }
+        }
+        if (element == null) {
+            return null;
+        }
+        IApplication application = Platform.getAdapterManager().getAdapter(element, IApplication.class);
+        if (application != null) {
+            return accessible(application.getProject());
+        }
+        return accessible(Platform.getAdapterManager().getAdapter(element, IProject.class));
+    }
+
+    private IProject soleWorkspaceProject() {
+        List<IProject> open = openProjects();
+        if (open.size() == 1) {
+            return open.get(0);
+        }
+        if (manager == null || open.isEmpty()) {
+            return null;
+        }
+        List<IProject> withApplications = new ArrayList<>();
+        for (IProject project : open) {
+            try {
+                if (!manager.getApplications(project).isEmpty()) {
+                    withApplications.add(project);
+                }
+            } catch (ApplicationException ex) {
+                logOnce("list:" + project.getName(),
+                        "Не удалось получить приложения проекта " + project.getName(), ex);
+            }
+        }
+        return withApplications.size() == 1 ? withApplications.get(0) : null;
+    }
+
+    private static List<IProject> openProjects() {
+        List<IProject> open = new ArrayList<>();
+        for (IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if (project.isAccessible()) {
+                open.add(project);
+            }
+        }
+        return open;
+    }
+
+    private static boolean hasAccessibleProject() {
+        return !openProjects().isEmpty();
+    }
+
+    private static IProject accessible(IProject project) {
+        return project != null && project.isAccessible() ? project : null;
+    }
+
+    private static IProject contextProject(ISelection selection) {
+        try {
+            return accessible(SelectionContextProject.getContextProject(selection));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private static IProject contextProject(IEditorPart editor) {
+        try {
+            return accessible(SelectionContextProject.getContextProject(editor));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private static IProject contextProject(IWorkbenchPage page) {
+        try {
+            return accessible(SelectionContextProject.getContextProject(page));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private String missingProjectText() {
+        return hasAccessibleProject() ? Texts.MANY_PROJECTS : Texts.NO_PROJECT;
     }
 
     private void reload() {
@@ -353,13 +595,13 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
         if (manager == null) {
             String text = connectFailed || supplier == null
                     ? Texts.NO_SERVICE
-                    : (currentProject == null ? Texts.NO_PROJECT : Texts.CONNECTING);
+                    : (currentProject == null ? missingProjectText() : Texts.CONNECTING);
             show(ApplyStatus.Level.NEUTRAL, text + Texts.CLICK_HINT, List.of(), List.of());
             return;
         }
         IProject project = currentProject;
         if (project == null || !project.isAccessible()) {
-            show(ApplyStatus.Level.NEUTRAL, Texts.NO_PROJECT + Texts.CLICK_HINT, List.of(), List.of());
+            show(ApplyStatus.Level.NEUTRAL, missingProjectText() + Texts.CLICK_HINT, List.of(), List.of());
             return;
         }
         List<IApplication> apps;
@@ -426,8 +668,8 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
         tooltip = text;
         applications = List.copyOf(apps);
         ensureIcons(apps, states);
+        applyTooltip(text);
         if (canvas != null && !canvas.isDisposed()) {
-            canvas.setToolTipText(text);
             canvas.redraw();
         }
     }
@@ -460,11 +702,12 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
     }
 
     private void showMenu() {
-        if (disposed || canvas == null || canvas.isDisposed()) {
+        Control parent = bar != null && !bar.isDisposed() ? bar : canvas;
+        if (disposed || parent == null || parent.isDisposed()) {
             return;
         }
         closeMenu();
-        menu = new Menu(canvas);
+        menu = new Menu(parent);
         List<IApplication> apps = applications;
         if (apps.isEmpty()) {
             MenuItem item = new MenuItem(menu, SWT.PUSH);
@@ -509,20 +752,25 @@ public class ApplyIndicatorContribution extends WorkbenchWindowControlContributi
         } catch (RuntimeException ex) {
             // На части платформ сглаживание просто недоступно.
         }
-        Point size = canvas.getSize();
+        Rectangle area = canvas.getClientArea();
         gc.setBackground(canvas.getBackground());
-        gc.fillRectangle(0, 0, size.x, size.y);
+        gc.fillRectangle(area);
         Color fill = fillFor(level);
         Color border = borderFor(level);
         if (fill == null || fill.isDisposed() || border == null || border.isDisposed()) {
             return;
         }
-        int x = Math.max(0, (size.x - SQUARE_SIZE) / 2);
-        int y = Math.max(0, (size.y - SQUARE_SIZE) / 2);
+        int inset = 1;
+        int side = Math.min(area.width, area.height) - inset * 2;
+        if (side < 4) {
+            return;
+        }
+        int x = area.x + (area.width - side) / 2;
+        int y = area.y + (area.height - side) / 2;
         gc.setBackground(fill);
-        gc.fillRoundRectangle(x, y, SQUARE_SIZE, SQUARE_SIZE, 3, 3);
+        gc.fillRoundRectangle(x, y, side, side, 2, 2);
         gc.setForeground(border);
-        gc.drawRoundRectangle(x, y, SQUARE_SIZE - 1, SQUARE_SIZE - 1, 3, 3);
+        gc.drawRoundRectangle(x, y, side - 1, side - 1, 2, 2);
     }
 
     private void createColors(Display display) {
