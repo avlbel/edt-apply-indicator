@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension point="org.eclipse.ui.menus">
+      <menuContribution locationURI="toolbar:org.eclipse.ui.trim.status">
+         <toolbar id="com.avlbel.edt.applyindicator.toolbar">
+            <separator/>
+            <control
+                  class="com.avlbel.edt.applyindicator.ApplyIndicatorContribution"
+                  id="com.avlbel.edt.applyindicator.control">
+            </control>
+         </toolbar>
+      </menuContribution>
+   </extension>
+</plugin>
